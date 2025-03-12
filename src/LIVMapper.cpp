@@ -51,6 +51,7 @@ void LIVMapper::readParameters(ros::NodeHandle &nh)
   nh.param<string>("common/lid_topic", lid_topic, "/livox/lidar");
   nh.param<string>("common/imu_topic", imu_topic, "/livox/imu");
   nh.param<bool>("common/ros_driver_bug_fix", ros_driver_fix_en, false);
+  nh.param<bool>("common/print_debug_info", print_debug_info, false);
   nh.param<int>("common/img_en", img_en, 1);
   nh.param<int>("common/lidar_en", lidar_en, 1);
   nh.param<string>("common/img_topic", img_topic, "/left_camera/image");
@@ -184,10 +185,10 @@ void LIVMapper::initializeFiles()
 void LIVMapper::initializeSubscribersAndPublishers(ros::NodeHandle &nh, image_transport::ImageTransport &it) 
 {
   sub_pcl = p_pre->lidar_type == AVIA ? 
-            nh.subscribe(lid_topic, 200000, &LIVMapper::livox_pcl_cbk, this): 
-            nh.subscribe(lid_topic, 200000, &LIVMapper::standard_pcl_cbk, this);
-  sub_imu = nh.subscribe(imu_topic, 200000, &LIVMapper::imu_cbk, this);
-  sub_img = nh.subscribe(img_topic, 200000, &LIVMapper::img_cbk, this);
+            nh.subscribe(lid_topic, 200000, &LIVMapper::livox_pcl_cbk, this, ros::TransportHints().tcpNoDelay()): 
+            nh.subscribe(lid_topic, 200000, &LIVMapper::standard_pcl_cbk, this, ros::TransportHints().tcpNoDelay());
+  sub_imu = nh.subscribe(imu_topic, 200000, &LIVMapper::imu_cbk, this, ros::TransportHints().tcpNoDelay());
+  sub_img = nh.subscribe(img_topic, 200000, &LIVMapper::img_cbk, this, ros::TransportHints().tcpNoDelay());
   
   pubLaserCloudFullRes = nh.advertise<sensor_msgs::PointCloud2>("/cloud_registered", 100);
   pubNormal = nh.advertise<visualization_msgs::MarkerArray>("visualization_marker", 100);
@@ -205,6 +206,7 @@ void LIVMapper::initializeSubscribersAndPublishers(ros::NodeHandle &nh, image_tr
   pubImage = it.advertise("/rgb_img", 1);
   pubImuPropOdom = nh.advertise<nav_msgs::Odometry>("/LIVO2/imu_propagate", 10000);
   imu_prop_timer = nh.createTimer(ros::Duration(0.004), &LIVMapper::imu_prop_callback, this);
+  voxelmap_manager->voxel_map_pub_= nh.advertise<visualization_msgs::MarkerArray>("/planes", 10000);
 }
 
 void LIVMapper::handleFirstFrame() 
@@ -412,7 +414,11 @@ void LIVMapper::handleLIO()
     voxelmap_manager->pv_list_[i].var = var;
   }
   voxelmap_manager->UpdateVoxelMap(voxelmap_manager->pv_list_);
-  std::cout << "[ LIO ] Update Voxel Map" << std::endl;
+  if (print_debug_info)
+  {
+    std::cout << "[ LIO ] Update Voxel Map" << std::endl;
+  }
+  
   _pv_list = voxelmap_manager->pv_list_;
   
   double t4 = omp_get_wtime();
@@ -438,6 +444,7 @@ void LIVMapper::handleLIO()
 
   if (!img_en) publish_frame_world(pubLaserCloudFullRes, vio_manager);
   if (pub_effect_point_en) publish_effect_world(pubLaserCloudEffect, voxelmap_manager->ptpl_list_);
+  if (voxelmap_manager->config_setting_.is_pub_plane_map_) voxelmap_manager->pubVoxelMap();
   publish_path(pubPath);
   publish_mavros(mavros_pose_publisher);
 
@@ -455,18 +462,23 @@ void LIVMapper::handleLIO()
   // printf("\033[1;36m[ LIO mapping time ]: current scan: icp: %0.6f secs, map incre: %0.6f secs, total: %0.6f secs.\033[0m\n"
   //         "\033[1;36m[ LIO mapping time ]: average: icp: %0.6f secs, map incre: %0.6f secs, total: %0.6f secs.\033[0m\n",
   //         t2 - t1, t4 - t3, t4 - t0, aver_time_icp, aver_time_map_inre, aver_time_consu);
-  printf("\033[1;34m+-------------------------------------------------------------+\033[0m\n");
-  printf("\033[1;34m|                         LIO Mapping Time                    |\033[0m\n");
-  printf("\033[1;34m+-------------------------------------------------------------+\033[0m\n");
-  printf("\033[1;34m| %-29s | %-27s |\033[0m\n", "Algorithm Stage", "Time (secs)");
-  printf("\033[1;34m+-------------------------------------------------------------+\033[0m\n");
-  printf("\033[1;36m| %-29s | %-27f |\033[0m\n", "DownSample", t_down - t0);
-  printf("\033[1;36m| %-29s | %-27f |\033[0m\n", "ICP", t2 - t1);
-  printf("\033[1;36m| %-29s | %-27f |\033[0m\n", "updateVoxelMap", t4 - t3);
-  printf("\033[1;34m+-------------------------------------------------------------+\033[0m\n");
-  printf("\033[1;36m| %-29s | %-27f |\033[0m\n", "Current Total Time", t4 - t0);
-  printf("\033[1;36m| %-29s | %-27f |\033[0m\n", "Average Total Time", aver_time_consu);
-  printf("\033[1;34m+-------------------------------------------------------------+\033[0m\n");
+  if (print_debug_info)
+  {
+    printf("\033[1;34m+-------------------------------------------------------------+\033[0m\n");
+    printf("\033[1;34m|                         LIO Mapping Time                    |\033[0m\n");
+    printf("\033[1;34m+-------------------------------------------------------------+\033[0m\n");
+    printf("\033[1;34m| %-29s | %-27s |\033[0m\n", "Algorithm Stage", "Time (secs)");
+    printf("\033[1;34m+-------------------------------------------------------------+\033[0m\n");
+    printf("\033[1;36m| %-29s | %-27f |\033[0m\n", "DownSample", t_down - t0);
+    printf("\033[1;36m| %-29s | %-27f |\033[0m\n", "ICP", t2 - t1);
+    printf("\033[1;36m| %-29s | %-27f |\033[0m\n", "updateVoxelMap", t4 - t3);
+    printf("\033[1;34m+-------------------------------------------------------------+\033[0m\n");
+    printf("\033[1;36m| %-29s | %-27f |\033[0m\n", "Current Total Time", t4 - t0);
+    printf("\033[1;36m| %-29s | %-27f |\033[0m\n", "Average Total Time", aver_time_consu);
+    printf("\033[1;34m+-------------------------------------------------------------+\033[0m\n");
+  }
+  
+
 
   euler_cur = RotMtoEuler(_state.rot_end);
   fout_out << std::setw(20) << LidarMeasures.last_lio_update_time - _first_lidar_time << " " << euler_cur.transpose() * 57.3 << " "
@@ -536,6 +548,7 @@ void LIVMapper::run()
     // if (!p_imu->imu_time_init) continue;
 
     stateEstimationAndMapping();
+    // rate.sleep();
   }
   savePCD();
 }
@@ -617,7 +630,29 @@ void LIVMapper::imu_prop_callback(const ros::TimerEvent &e)
     imu_prop_odom.twist.twist.linear.y = vel_i.y();
     imu_prop_odom.twist.twist.linear.z = vel_i.z();
     pubImuPropOdom.publish(imu_prop_odom);
-  }
+
+
+    if (pose_output_en) 
+    {
+      static bool pos_imu_opend = false;
+      std::ofstream evo_imu_rate_file;
+      if (!pos_imu_opend) 
+      {
+        evo_imu_rate_file.open(std::string(ROOT_DIR) + "Log/result/" + seq_name + "_imu_rate.txt", std::ios::out);
+        pos_imu_opend = true;
+        if (!evo_imu_rate_file.is_open()) ROS_ERROR("open fail\n");
+      } 
+      else 
+      {
+        evo_imu_rate_file.open(std::string(ROOT_DIR) + "Log/result/" + seq_name + "_imu_rate.txt", std::ios::app);
+        if (!evo_imu_rate_file.is_open()) ROS_ERROR("open fail\n");
+      }
+      Eigen::Quaterniond q_imu_rate(imu_propagate.rot_end);
+      evo_imu_rate_file << std::fixed;
+      evo_imu_rate_file << newest_imu.header.stamp.toSec() << " " << imu_propagate.pos_end[0] << " " << imu_propagate.pos_end[1] << " " << imu_propagate.pos_end[2] << " "
+                        << q_imu_rate.x() << " " << q_imu_rate.y() << " " << q_imu_rate.z() << " " << q_imu_rate.w() << std::endl;
+    }
+    }
   mtx_buffer_imu_prop.unlock();
 }
 
@@ -680,6 +715,7 @@ void LIVMapper::standard_pcl_cbk(const sensor_msgs::PointCloud2::ConstPtr &msg)
 {
   if (!lidar_en) return;
   mtx_buffer.lock();
+  // ROS_INFO("get lidar , its timestamp %.6f", msg->header.stamp.toSec());
   // cout<<"got feature"<<endl;
   if (msg->header.stamp.toSec() < last_timestamp_lidar)
   {
@@ -716,7 +752,7 @@ void LIVMapper::livox_pcl_cbk(const livox_ros_driver::CustomMsg::ConstPtr &msg_i
   }
 
   double cur_head_time = msg->header.stamp.toSec();
-  ROS_INFO("Get LiDAR, its header time: %.6f", cur_head_time);
+  // ROS_INFO("Get LiDAR, its header time: %.6f", cur_head_time);
   if (cur_head_time < last_timestamp_lidar)
   {
     ROS_ERROR("lidar loop back, clear buffer");
@@ -743,6 +779,9 @@ void LIVMapper::imu_cbk(const sensor_msgs::Imu::ConstPtr &msg_in)
   msg->header.stamp = ros::Time().fromSec(msg->header.stamp.toSec() - imu_time_offset);
   double timestamp = msg->header.stamp.toSec();
 
+  // ROS_INFO("Get IMU, its header time: %.6f", timestamp);
+  // ROS_INFO("last_timestamp_imu: %.6f", last_timestamp_imu);
+
   if (fabs(last_timestamp_lidar - timestamp) > 0.5 && (!ros_driver_fix_en))
   {
     ROS_WARN("IMU and LiDAR not synced! delta time: %lf .\n", last_timestamp_lidar - timestamp);
@@ -761,14 +800,14 @@ void LIVMapper::imu_cbk(const sensor_msgs::Imu::ConstPtr &msg_in)
     return;
   }
 
-  if (last_timestamp_imu > 0.0 && timestamp > last_timestamp_imu + 0.2)
-  {
+  // if (last_timestamp_imu > 0.0 && timestamp > last_timestamp_imu + 0.2)
+  // {
 
-    ROS_WARN("imu time stamp Jumps %0.4lf seconds \n", timestamp - last_timestamp_imu);
-    mtx_buffer.unlock();
-    sig_buffer.notify_all();
-    return;
-  }
+  //   ROS_WARN("imu time stamp Jumps %0.4lf seconds \n", timestamp - last_timestamp_imu);
+  //   mtx_buffer.unlock();
+  //   sig_buffer.notify_all();
+  //   return;
+  // }
 
   last_timestamp_imu = timestamp;
 
@@ -814,7 +853,7 @@ void LIVMapper::img_cbk(const sensor_msgs::ImageConstPtr &msg_in)
   // double msg_header_time =  msg->header.stamp.toSec();
   double msg_header_time = msg->header.stamp.toSec() + img_time_offset;
   if (abs(msg_header_time - last_timestamp_img) < 0.001) return;
-  ROS_INFO("Get image, its header time: %.6f", msg_header_time);
+  // ROS_INFO("Get image, its header time: %.6f", msg_header_time);
   if (last_timestamp_lidar < 0) return;
 
   if (msg_header_time < last_timestamp_img)

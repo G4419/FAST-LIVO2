@@ -66,37 +66,53 @@ struct orgtype
 /*** Velodyne ***/
 namespace velodyne_ros
 {
-struct EIGEN_ALIGN16 Point
+struct PointXYZIRT
 {
-  PCL_ADD_POINT4D;
-  float intensity;
-  std::uint32_t t;
-  std::uint16_t ring;
-  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-};
-} // namespace velodyne_ros
-POINT_CLOUD_REGISTER_POINT_STRUCT(velodyne_ros::Point,
-                                  (float, x, x)(float, y, y)(float, z, z)(float, intensity, intensity)(std::uint32_t, t, t)(std::uint16_t, ring, ring))
-/****************/
+  PCL_ADD_POINT4D;                    // quad-word XYZ
+  float         intensity;            ///< laser intensity reading
+  std::uint16_t ring;                 ///< laser ring number
+  float         time;                 ///< laser time reading
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW     // ensure proper alignment
+}
+EIGEN_ALIGN16;
+}  // namespace velodyne_ros
+
+POINT_CLOUD_REGISTER_POINT_STRUCT(velodyne_ros::PointXYZIRT,
+                                  (float, x, x)
+                                  (float, y, y)
+                                  (float, z, z)
+                                  (float, intensity, intensity)
+                                  (std::uint16_t, ring, ring)
+                                  (float, time, time))/****************/
 
 /*** Ouster ***/
 namespace ouster_ros
 {
-struct EIGEN_ALIGN16 Point
-{
-  PCL_ADD_POINT4D;
-  float intensity;
-  std::uint32_t t;
-  std::uint16_t reflectivity;
-  uint8_t ring;
-  std::uint16_t ambient;
-  std::uint32_t range;
-  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+struct EIGEN_ALIGN16 Point {
+    PCL_ADD_POINT4D;
+    float intensity;
+    uint32_t t;
+    uint16_t reflectivity;
+    uint8_t ring;
+    uint16_t ambient;
+    uint32_t range;
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 };
-} // namespace ouster_ros
-POINT_CLOUD_REGISTER_POINT_STRUCT(ouster_ros::Point, (float, x, x)(float, y, y)(float, z, z)(float, intensity, intensity)
-                                  (std::uint32_t, t, t)(std::uint16_t, reflectivity,
-                                                        reflectivity)(std::uint8_t, ring, ring)(std::uint16_t, ambient, ambient)(std::uint32_t, range, range))
+}  // namespace ouster_ros
+
+// clang-format off
+POINT_CLOUD_REGISTER_POINT_STRUCT(ouster_ros::Point,
+    (float, x, x)
+    (float, y, y)
+    (float, z, z)
+    (float, intensity, intensity)
+    // use std::uint32_t to avoid conflicting with pcl::uint32_t
+    (std::uint32_t, t, t)
+    (std::uint16_t, reflectivity, reflectivity)
+    (std::uint8_t, ring, ring)
+    (std::uint16_t, ambient, ambient)
+    (std::uint32_t, range, range)
+)
 /****************/
 
 /*** Hesai_XT32 ***/
@@ -130,6 +146,26 @@ POINT_CLOUD_REGISTER_POINT_STRUCT(Pandar128_ros::Point,
                                   (float, x, x)(float, y, y)(float, z, z)(float, timestamp, timestamp))
 /*****************/
 
+/*** rs ***/
+namespace rs32_ros {
+  struct EIGEN_ALIGN16 Point {
+      PCL_ADD_POINT4D;
+      uint8_t intensity;
+      uint16_t ring;
+      double timestamp;
+      EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+  };
+}  // namespace rs32_ros 
+POINT_CLOUD_REGISTER_POINT_STRUCT(rs32_ros::Point,
+    (float, x, x)
+    (float, y, y)
+    (float, z, z)
+    (uint8_t, intensity, intensity)
+    (uint16_t, ring, ring)
+    (double, timestamp, timestamp)
+)
+/*** rs ***/
+
 class Preprocess
 {
 public:
@@ -159,6 +195,7 @@ private:
   void xt32_handler(const sensor_msgs::PointCloud2::ConstPtr &msg);
   void Pandar128_handler(const sensor_msgs::PointCloud2::ConstPtr &msg);
   void l515_handler(const sensor_msgs::PointCloud2::ConstPtr &msg);
+  void rs32_handler(const sensor_msgs::PointCloud2::ConstPtr &msg);
   void give_feature(PointCloudXYZI &pl, vector<orgtype> &types);
   void pub_func(PointCloudXYZI &pl, const ros::Time &ct);
   int plane_judge(const PointCloudXYZI &pl, vector<orgtype> &types, uint i, uint &i_nex, Eigen::Vector3d &curr_direct);
