@@ -55,7 +55,8 @@ enum EKF_STATE
 {
   WAIT = 0,
   VIO = 1,
-  LIO = 2
+  LIO = 2,
+  LO = 3
 };
 
 struct MeasureGroup
